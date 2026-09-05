@@ -113,25 +113,46 @@ export const api = {
     } catch (err: any) {
       console.warn('Express backend getDashboard notice:', err?.message);
 
+      let activeUserId = userId;
       if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
         try {
-          let activeUserId = userId;
           const { data: userData } = await supabase.auth.getUser();
           if (userData?.user?.id) {
             activeUserId = userData.user.id;
           }
+        } catch {
+          // ignore auth fetch error
+        }
+      }
 
+      const storageKey = `marketpulse_watchlist_${activeUserId}`;
+      let localWatchlist: any[] = [];
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) localWatchlist = JSON.parse(raw);
+      } catch {
+        localWatchlist = [];
+      }
+
+      let supaWatchlist: any[] = [];
+      const stateMap = new Map();
+
+      if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
+        try {
           const { data: watchlistData } = await supabase
             .from('watchlist_stocks')
             .select('stock_symbol, stock_name, created_at')
             .eq('user_id', activeUserId);
+
+          if (watchlistData && watchlistData.length > 0) {
+            supaWatchlist = watchlistData;
+          }
 
           const { data: stateData } = await supabase
             .from('user_stock_state')
             .select('stock_symbol, last_seen_price, last_seen_at')
             .eq('user_id', activeUserId);
 
-          const stateMap = new Map();
           if (stateData) {
             for (const item of stateData) {
               const clean = item.stock_symbol.replace('.NS', '').trim();
@@ -145,55 +166,107 @@ export const api = {
               stateMap.set(`${clean}.NS`, stateObj);
             }
           }
-
-          const stocks = (watchlistData || []).map(item => {
-            const sym = item.stock_symbol;
-            const clean = sym.replace('.NS', '').trim();
-            const fallback = getFallbackStockData(sym);
-
-            const st = stateMap.get(sym) || stateMap.get(clean) || stateMap.get(`${clean}.NS`) || {
-              hasBaseline: false,
-              lastSeenPrice: null,
-              lastSeenAt: null,
-            };
-
-            const hasBaseline = st.hasBaseline;
-            const lastSeenPrice = st.lastSeenPrice;
-            let sinceLastSeenChange = 0;
-            let sinceLastSeenPercent = 0;
-
-            if (hasBaseline && lastSeenPrice && lastSeenPrice > 0) {
-              sinceLastSeenChange = fallback.currentPrice - lastSeenPrice;
-              sinceLastSeenPercent = (sinceLastSeenChange / lastSeenPrice) * 100;
-            }
-
-            return {
-              symbol: sym,
-              companyName: item.stock_name || fallback.companyName,
-              currentPrice: fallback.currentPrice,
-              change1D: fallback.change1D,
-              percentChange1D: fallback.percentChange1D,
-              high52W: Number((fallback.currentPrice * 1.25).toFixed(2)),
-              low52W: Number((fallback.currentPrice * 0.75).toFixed(2)),
-              hasBaseline,
-              lastSeenPrice,
-              lastSeenAt: st.lastSeenAt,
-              sinceLastSeenChange: Number(sinceLastSeenChange.toFixed(2)),
-              sinceLastSeenPercent: Number(sinceLastSeenPercent.toFixed(2)),
-              microTags: [],
-            };
-          });
-
-          return {
-            totalWatchlistCount: stocks.length,
-            stocks,
-          };
         } catch (supaErr: any) {
           console.error('Direct Supabase getDashboard exception:', supaErr?.message);
         }
       }
 
-      throw err;
+      // Combine Supabase and LocalStorage watchlist items safely
+      const combinedMap = new Map<string, { stock_symbol: string; stock_name: string }>();
+
+      for (const item of supaWatchlist) {
+        if (item.stock_symbol) {
+          const clean = item.stock_symbol.replace('.NS', '').trim();
+          combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+        }
+      }
+
+      for (const item of localWatchlist) {
+        if (item.stock_symbol && !combinedMap.has(item.stock_symbol)) {
+          const clean = item.stock_symbol.replace('.NS', '').trim();
+          combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+        }
+      }
+
+      // If both Supabase & LocalStorage are empty (brand new session), seed default catalog stocks
+      if (combinedMap.size === 0) {
+        const defaults = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'];
+        for (const sym of defaults) {
+          const clean = sym.replace('.NS', '');
+          combinedMap.set(sym, { stock_symbol: sym, stock_name: clean });
+        }
+      }
+
+      const finalItems = Array.from(combinedMap.values());
+
+      // Save back to LocalStorage to keep local cache synced
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(finalItems));
+      } catch {}
+
+      // If Supabase is connected but empty, insert initial default stocks to Supabase DB as well
+      if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user' && supaWatchlist.length === 0) {
+        for (const item of finalItems) {
+          try {
+            const { error: upsertErr } = await supabase.from('watchlist_stocks').upsert({
+              user_id: activeUserId,
+              stock_symbol: item.stock_symbol,
+              stock_name: item.stock_name,
+            }, { onConflict: 'user_id,stock_symbol' });
+
+            if (upsertErr) {
+              await supabase.from('watchlist_stocks').insert({
+                user_id: activeUserId,
+                stock_symbol: item.stock_symbol,
+                stock_name: item.stock_name,
+              });
+            }
+          } catch {}
+        }
+      }
+
+      const stocks = finalItems.map(item => {
+        const sym = item.stock_symbol;
+        const clean = sym.replace('.NS', '').trim();
+        const fallback = getFallbackStockData(sym);
+
+        const st = stateMap.get(sym) || stateMap.get(clean) || stateMap.get(`${clean}.NS`) || {
+          hasBaseline: false,
+          lastSeenPrice: null,
+          lastSeenAt: null,
+        };
+
+        const hasBaseline = st.hasBaseline;
+        const lastSeenPrice = st.lastSeenPrice;
+        let sinceLastSeenChange = 0;
+        let sinceLastSeenPercent = 0;
+
+        if (hasBaseline && lastSeenPrice && lastSeenPrice > 0) {
+          sinceLastSeenChange = fallback.currentPrice - lastSeenPrice;
+          sinceLastSeenPercent = (sinceLastSeenChange / lastSeenPrice) * 100;
+        }
+
+        return {
+          symbol: sym,
+          companyName: item.stock_name || fallback.companyName,
+          currentPrice: fallback.currentPrice,
+          change1D: fallback.change1D,
+          percentChange1D: fallback.percentChange1D,
+          high52W: Number((fallback.currentPrice * 1.25).toFixed(2)),
+          low52W: Number((fallback.currentPrice * 0.75).toFixed(2)),
+          hasBaseline,
+          lastSeenPrice,
+          lastSeenAt: st.lastSeenAt,
+          sinceLastSeenChange: Number(sinceLastSeenChange.toFixed(2)),
+          sinceLastSeenPercent: Number(sinceLastSeenPercent.toFixed(2)),
+          microTags: [],
+        };
+      });
+
+      return {
+        totalWatchlistCount: stocks.length,
+        stocks,
+      };
     }
   },
 
@@ -220,37 +293,59 @@ export const api = {
     const cleanSymbol = symbol.toUpperCase().trim();
     const companyName = cleanSymbol.replace('.NS', '');
 
-    let supaSuccess = false;
-    if (isSupabaseConfigured && supabase) {
+    let activeUserId = userId;
+    if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
-        let activeUserId = userId;
         const { data: userData } = await supabase.auth.getUser();
         if (userData?.user?.id) {
           activeUserId = userData.user.id;
         }
+      } catch {}
+    }
 
+    // 1. Update LocalStorage immediately for active user ID
+    const storageKey = `marketpulse_watchlist_${activeUserId}`;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const list: any[] = raw ? JSON.parse(raw) : [];
+      const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
+      if (!list.some(item => item.stock_symbol === cleanSymbol || item.stock_symbol === altSymbol)) {
+        list.push({ stock_symbol: cleanSymbol, stock_name: companyName, created_at: new Date().toISOString() });
+        localStorage.setItem(storageKey, JSON.stringify(list));
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error:', e);
+    }
+
+    // 2. Persist to Supabase DB
+    if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
+      try {
         const { error } = await supabase.from('watchlist_stocks').upsert({
           user_id: activeUserId,
           stock_symbol: cleanSymbol,
           stock_name: companyName,
         }, { onConflict: 'user_id,stock_symbol' });
 
-        if (!error || error.code === '23505' || error.message?.includes('duplicate')) {
-          supaSuccess = true;
-        } else {
-          console.warn('Supabase insert notice:', error?.message);
+        if (error) {
+          try {
+            await supabase.from('watchlist_stocks').insert({
+              user_id: activeUserId,
+              stock_symbol: cleanSymbol,
+              stock_name: companyName,
+            });
+          } catch {}
         }
       } catch (supaErr: any) {
         console.warn('Direct Supabase insert exception:', supaErr?.message);
       }
     }
 
+    // 3. Persist to Express backend if reachable
     try {
       await request<{ message: string }>('/watchlist', userId, {
         method: 'POST',
         body: JSON.stringify({ symbol: cleanSymbol }),
       });
-      supaSuccess = true;
     } catch (apiErr: any) {
       console.warn('Express backend add stock notice:', apiErr?.message);
     }
@@ -260,18 +355,34 @@ export const api = {
 
   removeStock: async (userId: string, symbol: string) => {
     const cleanSymbol = symbol.toUpperCase().trim();
+    const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
 
-    let supaSuccess = false;
-    if (isSupabaseConfigured && supabase) {
+    let activeUserId = userId;
+    if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
-        let activeUserId = userId;
         const { data: userData } = await supabase.auth.getUser();
         if (userData?.user?.id) {
           activeUserId = userData.user.id;
         }
+      } catch {}
+    }
 
-        const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
+    // 1. Remove from LocalStorage immediately
+    const storageKey = `marketpulse_watchlist_${activeUserId}`;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const list: any[] = JSON.parse(raw);
+        const filtered = list.filter(item => item.stock_symbol !== cleanSymbol && item.stock_symbol !== altSymbol);
+        localStorage.setItem(storageKey, JSON.stringify(filtered));
+      }
+    } catch (e) {
+      console.warn('LocalStorage remove error:', e);
+    }
 
+    // 2. Delete from Supabase DB
+    if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
+      try {
         await supabase.from('watchlist_stocks')
           .delete()
           .eq('user_id', activeUserId)
@@ -281,18 +392,16 @@ export const api = {
           .delete()
           .eq('user_id', activeUserId)
           .in('stock_symbol', [cleanSymbol, altSymbol]);
-
-        supaSuccess = true;
       } catch (supaErr: any) {
         console.warn('Direct Supabase delete notice:', supaErr?.message);
       }
     }
 
+    // 3. Delete from Express backend if reachable
     try {
       await request<{ message: string }>(`/watchlist/${cleanSymbol}`, userId, {
         method: 'DELETE',
       });
-      supaSuccess = true;
     } catch (apiErr: any) {
       console.warn('Express backend remove stock notice:', apiErr?.message);
     }
