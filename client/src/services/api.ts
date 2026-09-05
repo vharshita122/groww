@@ -1,7 +1,8 @@
 import { DashboardData, StockCatalogItem, StockNewsResponse } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-const API_BASE = '/api';
+const rawApiBase = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE = rawApiBase ? `${rawApiBase.replace(/\/$/, '')}/api` : '/api';
 
 
 async function request<T>(endpoint: string, userId: string = 'demo-user', options: RequestInit = {}): Promise<T> {

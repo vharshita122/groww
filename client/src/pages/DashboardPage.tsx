@@ -103,7 +103,9 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
   useEffect(() => {
     let es: EventSource | null = null;
     try {
-      es = new EventSource(`/api/live-stream`);
+      const rawApiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const sseUrl = rawApiBase ? `${rawApiBase.replace(/\/$/, '')}/api/live-stream` : `/api/live-stream`;
+      es = new EventSource(sseUrl);
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
