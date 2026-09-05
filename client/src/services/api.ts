@@ -149,31 +149,6 @@ export const api = {
         }
       }
 
-      const keysToSearch = getCandidateStorageKeys(activeUserId, activeUserEmail);
-      if (userId && userId !== activeUserId) {
-        getCandidateStorageKeys(userId, userEmail).forEach(k => {
-          if (!keysToSearch.includes(k)) keysToSearch.push(k);
-        });
-      }
-
-      // Collect local watchlist items across ALL candidate storage keys for this user
-      const combinedMap = new Map<string, { stock_symbol: string; stock_name: string }>();
-
-      for (const key of keysToSearch) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const list: any[] = JSON.parse(raw);
-            for (const item of list) {
-              if (item && item.stock_symbol) {
-                const clean = item.stock_symbol.replace('.NS', '').trim();
-                combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
-              }
-            }
-          }
-        } catch {}
-      }
-
       let supaWatchlist: any[] = [];
       const stateMap = new Map();
 
@@ -186,12 +161,6 @@ export const api = {
 
           if (watchlistData && watchlistData.length > 0) {
             supaWatchlist = watchlistData;
-            for (const item of supaWatchlist) {
-              if (item.stock_symbol) {
-                const clean = item.stock_symbol.replace('.NS', '').trim();
-                combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
-              }
-            }
           }
 
           const { data: stateData } = await supabase
@@ -217,7 +186,40 @@ export const api = {
         }
       }
 
-      // If both Supabase & LocalStorage are empty (brand new session), seed default catalog stocks
+      const keysToSearch = getCandidateStorageKeys(activeUserId, activeUserEmail);
+      if (userId && userId !== activeUserId) {
+        getCandidateStorageKeys(userId, userEmail).forEach(k => {
+          if (!keysToSearch.includes(k)) keysToSearch.push(k);
+        });
+      }
+
+      const combinedMap = new Map<string, { stock_symbol: string; stock_name: string }>();
+
+      // 1. Load from Supabase DB
+      for (const item of supaWatchlist) {
+        if (item.stock_symbol) {
+          const clean = item.stock_symbol.replace('.NS', '').trim();
+          combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+        }
+      }
+
+      // 2. Also load from LocalStorage cache as fallback/supplement
+      for (const key of keysToSearch) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const list: any[] = JSON.parse(raw);
+            for (const item of list) {
+              if (item && item.stock_symbol && !combinedMap.has(item.stock_symbol)) {
+                const clean = item.stock_symbol.replace('.NS', '').trim();
+                combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 3. ONLY if BOTH Supabase DB AND LocalStorage return NOTHING for a brand new user, seed default catalog stocks
       if (combinedMap.size === 0) {
         const defaults = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'];
         for (const sym of defaults) {
@@ -228,32 +230,11 @@ export const api = {
 
       const finalItems = Array.from(combinedMap.values());
 
-      // Save back to ALL candidate storage keys so future logins find them intact
+      // Save synced list to local storage
       for (const key of keysToSearch) {
         try {
           localStorage.setItem(key, JSON.stringify(finalItems));
         } catch {}
-      }
-
-      // Sync to Supabase DB if DB was empty
-      if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user' && supaWatchlist.length === 0) {
-        for (const item of finalItems) {
-          try {
-            const { error: upsertErr } = await supabase.from('watchlist_stocks').upsert({
-              user_id: activeUserId,
-              stock_symbol: item.stock_symbol,
-              stock_name: item.stock_name,
-            }, { onConflict: 'user_id,stock_symbol' });
-
-            if (upsertErr) {
-              await supabase.from('watchlist_stocks').insert({
-                user_id: activeUserId,
-                stock_symbol: item.stock_symbol,
-                stock_name: item.stock_name,
-              });
-            }
-          } catch {}
-        }
       }
 
       const stocks = finalItems.map(item => {
@@ -338,6 +319,7 @@ export const api = {
       } catch {}
     }
 
+    // 1. Update LocalStorage cache immediately
     const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
     if (userId && userId !== activeUserId) {
       getCandidateStorageKeys(userId, userEmail).forEach(k => {
@@ -359,7 +341,7 @@ export const api = {
       }
     }
 
-    // Persist to Supabase DB
+    // 2. Persist directly to Supabase DB using activeUserId
     if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
       try {
         const { error } = await supabase.from('watchlist_stocks').upsert({
@@ -382,7 +364,7 @@ export const api = {
       }
     }
 
-    // Persist to Express backend if reachable
+    // 3. Persist to Express backend if reachable
     try {
       await request<{ message: string }>('/watchlist', userId, {
         method: 'POST',
@@ -413,6 +395,7 @@ export const api = {
       } catch {}
     }
 
+    // 1. Remove from LocalStorage cache
     const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
     if (userId && userId !== activeUserId) {
       getCandidateStorageKeys(userId, userEmail).forEach(k => {
@@ -433,7 +416,7 @@ export const api = {
       }
     }
 
-    // Delete from Supabase DB
+    // 2. Delete from Supabase DB
     if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
       try {
         await supabase.from('watchlist_stocks')
@@ -450,7 +433,7 @@ export const api = {
       }
     }
 
-    // Delete from Express backend if reachable
+    // 3. Delete from Express backend if reachable
     try {
       await request<{ message: string }>(`/watchlist/${cleanSymbol}`, userId, {
         method: 'DELETE',
