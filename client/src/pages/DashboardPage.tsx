@@ -10,6 +10,7 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { UserSession, DashboardData, WatchlistStockData } from '../types';
 import { api, getFallbackStockData } from '../services/api';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface Props {
   session: UserSession;
@@ -97,6 +98,17 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
 
   useEffect(() => {
     loadDashboard();
+
+    if (isSupabaseConfigured && supabase) {
+      const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, supaSession: any) => {
+        if (supaSession?.user) {
+          loadDashboard();
+        }
+      });
+      return () => {
+        authListener?.subscription?.unsubscribe();
+      };
+    }
   }, [loadDashboard]);
 
   // Connect to SSE Live Stream for continuous LTP updates without overwriting session baseline
