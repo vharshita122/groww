@@ -48,17 +48,25 @@ export const api = {
     let supaSuccess = false;
     if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
-        const stocks = await request<StockCatalogItem[]>('/stocks').catch(() => []);
-        const stock = stocks.find(s => s.symbol === cleanSymbol || s.symbol.replace('.NS', '') === cleanSymbol.replace('.NS', ''));
-        const companyName = stock ? stock.companyName : cleanSymbol.replace('.NS', '');
+        const companyName = cleanSymbol.replace('.NS', '');
+        
+        let activeUserId = userId;
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user?.id) {
+          activeUserId = userData.user.id;
+        }
 
-        const { error } = await supabase.from('watchlist_stocks').upsert({
-          user_id: userId,
+        const { error } = await supabase.from('watchlist_stocks').insert({
+          user_id: activeUserId,
           stock_symbol: cleanSymbol,
           stock_name: companyName,
-        }, { onConflict: 'user_id,stock_symbol' });
+        });
 
-        if (!error) supaSuccess = true;
+        if (!error || error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('already exists')) {
+          supaSuccess = true;
+        } else {
+          console.warn('Supabase insert warning:', error);
+        }
       } catch (supaErr) {
         console.warn('Direct Supabase insert notice:', supaErr);
       }
@@ -69,10 +77,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ symbol: cleanSymbol }),
       });
+      supaSuccess = true;
     } catch (apiErr) {
       console.warn('Express backend add stock endpoint notice:', apiErr);
       if (!supaSuccess && userId !== 'demo-user') {
-        throw apiErr;
+        throw new Error('Failed to add stock to watchlist. Please check Supabase RLS policy or backend server status.');
       }
     }
 
@@ -84,9 +93,24 @@ export const api = {
     let supaSuccess = false;
     if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
+        let activeUserId = userId;
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user?.id) {
+          activeUserId = userData.user.id;
+        }
+
         const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
-        await supabase.from('watchlist_stocks').delete().or(`stock_symbol.eq.${cleanSymbol},stock_symbol.eq.${altSymbol}`).eq('user_id', userId);
-        await supabase.from('user_stock_state').delete().or(`stock_symbol.eq.${cleanSymbol},stock_symbol.eq.${altSymbol}`).eq('user_id', userId);
+
+        await supabase.from('watchlist_stocks')
+          .delete()
+          .eq('user_id', activeUserId)
+          .in('stock_symbol', [cleanSymbol, altSymbol]);
+
+        await supabase.from('user_stock_state')
+          .delete()
+          .eq('user_id', activeUserId)
+          .in('stock_symbol', [cleanSymbol, altSymbol]);
+
         supaSuccess = true;
       } catch (supaErr) {
         console.warn('Direct Supabase delete notice:', supaErr);
@@ -97,10 +121,11 @@ export const api = {
       await request<{ message: string }>(`/watchlist/${cleanSymbol}`, userId, {
         method: 'DELETE',
       });
+      supaSuccess = true;
     } catch (apiErr) {
       console.warn('Express backend remove stock endpoint notice:', apiErr);
       if (!supaSuccess && userId !== 'demo-user') {
-        throw apiErr;
+        throw new Error('Failed to remove stock from watchlist.');
       }
     }
 
