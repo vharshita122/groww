@@ -228,16 +228,69 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
 
 
     
-  const handleRemoveStock = async (symbol: string) => {
+  const selectedStock = allActiveStocks.find(s => s.symbol === selectedStockSymbol) || null;
+
+  const handleAddStockOptimistic = useCallback(async (stockItem: any) => {
+    const sym = stockItem.symbol;
+    const clean = sym.replace('.NS', '').trim();
+
+    setDashboardData(prev => {
+      const existingStocks = prev ? prev.stocks : [];
+      if (existingStocks.some(s => s.symbol === sym || s.symbol.replace('.NS', '').trim() === clean)) {
+        return prev;
+      }
+
+      const price = stockItem.currentPrice || 1000;
+      const newStock: any = {
+        symbol: sym,
+        companyName: stockItem.companyName || clean,
+        currentPrice: price,
+        change1D: 0,
+        percentChange1D: 0,
+        high52W: Number((price * 1.25).toFixed(2)),
+        low52W: Number((price * 0.75).toFixed(2)),
+        hasBaseline: false,
+        lastSeenPrice: null,
+        lastSeenAt: null,
+        sinceLastSeenChange: 0,
+        sinceLastSeenPercent: 0,
+        microTags: [],
+      };
+
+      const updatedStocks = [...existingStocks, newStock];
+      return {
+        ...prev,
+        totalWatchlistCount: updatedStocks.length,
+        stocks: updatedStocks,
+      };
+    });
+
+    try {
+      await api.addStock(session.id, sym);
+    } catch (err) {
+      console.warn('Async addStock notice:', err);
+    }
+  }, [session.id]);
+
+  const handleRemoveStockOptimistic = useCallback(async (symbol: string) => {
+    const clean = symbol.replace('.NS', '').trim();
+
+    setDashboardData(prev => {
+      if (!prev) return prev;
+      const updatedStocks = prev.stocks.filter(s => s.symbol !== symbol && s.symbol.replace('.NS', '').trim() !== clean);
+      return {
+        ...prev,
+        totalWatchlistCount: updatedStocks.length,
+        stocks: updatedStocks,
+      };
+    });
+
     try {
       await api.removeStock(session.id, symbol);
-      await loadDashboard();
-    } catch (err: any) {
-      console.error('Failed to remove stock:', err);
+    } catch (err) {
+      console.warn('Async removeStock notice:', err);
     }
-  };
-
-  const selectedStock = allActiveStocks.find(s => s.symbol === selectedStockSymbol) || null;
+  }, [session.id]);
 
   return (
     <div className="min-h-screen bg-brand-bg text-brand-text flex flex-col font-sans">
@@ -341,7 +394,7 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
                     stock={stock}
                     sortMode={sortMode}
                     onClick={(sym) => setSelectedStockSymbol(sym)}
-                    onRemove={handleRemoveStock}
+                    onRemove={handleRemoveStockOptimistic}
                     onOpenNews={(stk) => setNewsStock({ symbol: stk.symbol, companyName: stk.companyName })}
                   />
                 ))}
@@ -378,6 +431,8 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
         userId={session.id}
         activeStocks={allActiveStocks as any}
         onWatchlistChanged={loadDashboard}
+        onAddStock={handleAddStockOptimistic}
+        onRemoveStock={handleRemoveStockOptimistic}
       />
     </div>
   );

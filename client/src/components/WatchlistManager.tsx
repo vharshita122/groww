@@ -9,6 +9,8 @@ interface Props {
   userId: string;
   activeStocks: WatchlistStockData[];
   onWatchlistChanged: () => void;
+  onAddStock?: (stock: StockCatalogItem) => void;
+  onRemoveStock?: (symbol: string) => void;
 }
 
 export const WatchlistManager: React.FC<Props> = ({
@@ -17,6 +19,8 @@ export const WatchlistManager: React.FC<Props> = ({
   userId,
   activeStocks,
   onWatchlistChanged,
+  onAddStock,
+  onRemoveStock,
 }) => {
   const [catalog, setCatalog] = useState<StockCatalogItem[]>([]);
   const [search, setSearch] = useState('');
@@ -47,14 +51,18 @@ export const WatchlistManager: React.FC<Props> = ({
       item.sector.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleAdd = async (symbol: string) => {
-    setLoadingSymbol(symbol);
+  const handleAdd = async (stock: StockCatalogItem) => {
+    setLoadingSymbol(stock.symbol);
     setError(null);
     try {
-      await api.addStock(userId, symbol);
-      await onWatchlistChanged();
+      if (onAddStock) {
+        onAddStock(stock);
+      } else {
+        await api.addStock(userId, stock.symbol);
+        await onWatchlistChanged();
+      }
     } catch (err: any) {
-      setError(err.message);
+      console.error('Failed to add stock:', err);
     } finally {
       setLoadingSymbol(null);
     }
@@ -64,10 +72,14 @@ export const WatchlistManager: React.FC<Props> = ({
     setLoadingSymbol(symbol);
     setError(null);
     try {
-      await api.removeStock(userId, symbol);
-      await onWatchlistChanged();
+      if (onRemoveStock) {
+        onRemoveStock(symbol);
+      } else {
+        await api.removeStock(userId, symbol);
+        await onWatchlistChanged();
+      }
     } catch (err: any) {
-      setError(err.message);
+      console.error('Failed to remove stock:', err);
     } finally {
       setLoadingSymbol(null);
     }
@@ -154,7 +166,7 @@ export const WatchlistManager: React.FC<Props> = ({
                     </button>
                   ) : (
                     <button
-                      onClick={() => handleAdd(stock.symbol)}
+                      onClick={() => handleAdd(stock)}
                       disabled={isLoading}
                       className="px-3.5 py-1.5 bg-brand-green hover:bg-emerald-500 text-brand-bg rounded-xl text-xs font-semibold transition flex items-center space-x-1 shadow-md"
                     >
