@@ -148,7 +148,7 @@ export const api = {
     const companyName = cleanSymbol.replace('.NS', '');
 
     let supaSuccess = false;
-    if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
+    if (isSupabaseConfigured && supabase) {
       try {
         let activeUserId = userId;
         const { data: userData } = await supabase.auth.getUser();
@@ -188,7 +188,7 @@ export const api = {
     const cleanSymbol = symbol.toUpperCase().trim();
 
     let supaSuccess = false;
-    if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
+    if (isSupabaseConfigured && supabase) {
       try {
         let activeUserId = userId;
         const { data: userData } = await supabase.auth.getUser();
