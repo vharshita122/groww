@@ -23,7 +23,12 @@ export const WatchlistManager: React.FC<Props> = ({
   const [loadingSymbol, setLoadingSymbol] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const activeSymbols = new Set(activeStocks.map(s => s.symbol));
+  const activeSymbols = new Set(
+    activeStocks.flatMap(s => {
+      const clean = s.symbol.replace('.NS', '').trim();
+      return [s.symbol, clean, `${clean}.NS`];
+    })
+  );
 
   useEffect(() => {
     if (isOpen) {
