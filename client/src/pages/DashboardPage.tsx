@@ -97,19 +97,45 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
   }, [session.id, session.email]);
 
   useEffect(() => {
-    loadDashboard();
-
-    if (isSupabaseConfigured && supabase) {
-      const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, supaSession: any) => {
-        if (supaSession?.user) {
-          loadDashboard();
-        }
-      });
-      return () => {
-        authListener?.subscription?.unsubscribe();
-      };
+    // For demo users or when Supabase is not configured, load immediately
+    if (!isSupabaseConfigured || !supabase || session.isDemo) {
+      loadDashboard();
+      return;
     }
-  }, [loadDashboard]);
+
+    // === CRITICAL FIX: Do NOT call loadDashboard() immediately ===
+    // Wait until Supabase auth confirms a valid session exists.
+    // Without this, the dashboard fetch runs before the JWT is available,
+    // RLS blocks the query (returns 0 rows), and defaults get seeded.
+    let hasLoaded = false;
+
+    const doLoadOnce = () => {
+      if (!hasLoaded) {
+        hasLoaded = true;
+        loadDashboard();
+      }
+    };
+
+    // 1. Check if session is already available right now (covers re-renders, fast logins)
+    supabase.auth.getSession().then(({ data: { session: supaSession } }) => {
+      if (supaSession?.user?.id && supaSession?.access_token) {
+        doLoadOnce();
+      }
+    });
+
+    // 2. Listen for auth state changes (covers session restore, token refresh, new login)
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, supaSession: any) => {
+      if (supaSession?.user) {
+        // Always reload on auth change (even if already loaded) to pick up fresh data
+        hasLoaded = false;
+        doLoadOnce();
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [loadDashboard, session.isDemo]);
 
   // Connect to SSE Live Stream for continuous LTP updates without overwriting session baseline
   useEffect(() => {

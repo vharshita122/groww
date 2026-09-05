@@ -134,16 +134,21 @@ export const api = {
 
       let activeUserId = userId;
       let activeUserEmail = userEmail || '';
+      let hasValidToken = false;
 
       if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
         try {
-          const { data: userData } = await supabase.auth.getUser();
-          if (userData?.user?.id) {
-            activeUserId = userData.user.id;
+          // Use getSession() NOT getUser() — getSession() reads from local cache (instant),
+          // getUser() makes a network request that can fail during auth initialization.
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user?.id) {
+            activeUserId = sessionData.session.user.id;
           }
-          if (userData?.user?.email) {
-            activeUserEmail = userData.user.email;
+          if (sessionData?.session?.user?.email) {
+            activeUserEmail = sessionData.session.user.email;
           }
+          // Only mark as valid if we have an actual access token
+          hasValidToken = !!sessionData?.session?.access_token;
         } catch {
           // ignore auth fetch error
         }
@@ -152,7 +157,10 @@ export const api = {
       let supaWatchlist: any[] = [];
       const stateMap = new Map();
 
-      if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user') {
+      // === CRITICAL: Only query Supabase if we have a valid JWT token ===
+      // Without a token, RLS returns 0 rows, and the code below seeds defaults,
+      // which poisons localStorage and destroys the user's real watchlist.
+      if (isSupabaseConfigured && supabase && activeUserId !== 'demo-user' && hasValidToken) {
         try {
           const { data: watchlistData } = await supabase
             .from('watchlist_stocks')
@@ -309,12 +317,12 @@ export const api = {
     let activeUserEmail = userEmail || '';
     if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user?.id) {
-          activeUserId = userData.user.id;
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          activeUserId = sessionData.session.user.id;
         }
-        if (userData?.user?.email) {
-          activeUserEmail = userData.user.email;
+        if (sessionData?.session?.user?.email) {
+          activeUserEmail = sessionData.session.user.email;
         }
       } catch {}
     }
@@ -385,12 +393,12 @@ export const api = {
     let activeUserEmail = userEmail || '';
     if (isSupabaseConfigured && supabase && userId !== 'demo-user') {
       try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user?.id) {
-          activeUserId = userData.user.id;
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          activeUserId = sessionData.session.user.id;
         }
-        if (userData?.user?.email) {
-          activeUserEmail = userData.user.email;
+        if (sessionData?.session?.user?.email) {
+          activeUserEmail = sessionData.session.user.email;
         }
       } catch {}
     }
