@@ -194,56 +194,55 @@ export const api = {
         }
       }
 
-      const keysToSearch = getCandidateStorageKeys(activeUserId, activeUserEmail);
-      if (userId && userId !== activeUserId) {
-        getCandidateStorageKeys(userId, userEmail).forEach(k => {
-          if (!keysToSearch.includes(k)) keysToSearch.push(k);
-        });
-      }
-
       const combinedMap = new Map<string, { stock_symbol: string; stock_name: string }>();
 
-      // 1. Load from Supabase DB
-      for (const item of supaWatchlist) {
-        if (item.stock_symbol) {
-          const clean = item.stock_symbol.replace('.NS', '').trim();
-          combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+      if (activeUserId !== 'demo-user') {
+        // Authenticated users rely STRICTLY on Supabase
+        for (const item of supaWatchlist) {
+          if (item.stock_symbol) {
+            const clean = item.stock_symbol.replace('.NS', '').trim();
+            combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+          }
         }
-      }
-
-      // 2. Also load from LocalStorage cache as fallback/supplement
-      for (const key of keysToSearch) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const list: any[] = JSON.parse(raw);
-            for (const item of list) {
-              if (item && item.stock_symbol && !combinedMap.has(item.stock_symbol)) {
-                const clean = item.stock_symbol.replace('.NS', '').trim();
-                combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+      } else {
+        // Demo users rely on LocalStorage
+        const keysToSearch = getCandidateStorageKeys(activeUserId, activeUserEmail);
+        for (const key of keysToSearch) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const list: any[] = JSON.parse(raw);
+              for (const item of list) {
+                if (item && item.stock_symbol && !combinedMap.has(item.stock_symbol)) {
+                  const clean = item.stock_symbol.replace('.NS', '').trim();
+                  combinedMap.set(item.stock_symbol, { stock_symbol: item.stock_symbol, stock_name: item.stock_name || clean });
+                }
               }
             }
+          } catch {}
+        }
+        
+        // Only seed defaults for demo users if empty
+        if (combinedMap.size === 0) {
+          const defaults = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'];
+          for (const sym of defaults) {
+            const clean = sym.replace('.NS', '');
+            combinedMap.set(sym, { stock_symbol: sym, stock_name: clean });
           }
-        } catch {}
-      }
-
-      // 3. ONLY if BOTH Supabase DB AND LocalStorage return NOTHING for a brand new user, seed default catalog stocks
-      if (combinedMap.size === 0) {
-        const defaults = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'];
-        for (const sym of defaults) {
-          const clean = sym.replace('.NS', '');
-          combinedMap.set(sym, { stock_symbol: sym, stock_name: clean });
+        }
+        
+        // Save demo state back to localStorage
+        const finalItems = Array.from(combinedMap.values());
+        for (const key of keysToSearch) {
+          try {
+            localStorage.setItem(key, JSON.stringify(finalItems));
+          } catch {}
         }
       }
 
       const finalItems = Array.from(combinedMap.values());
 
-      // Save synced list to local storage
-      for (const key of keysToSearch) {
-        try {
-          localStorage.setItem(key, JSON.stringify(finalItems));
-        } catch {}
-      }
+
 
       const stocks = finalItems.map(item => {
         const sym = item.stock_symbol;
@@ -327,25 +326,27 @@ export const api = {
       } catch {}
     }
 
-    // 1. Update LocalStorage cache immediately
-    const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
-    if (userId && userId !== activeUserId) {
-      getCandidateStorageKeys(userId, userEmail).forEach(k => {
-        if (!keysToUpdate.includes(k)) keysToUpdate.push(k);
-      });
-    }
+    // 1. Update LocalStorage cache only for demo users
+    if (activeUserId === 'demo-user') {
+      const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
+      if (userId && userId !== activeUserId) {
+        getCandidateStorageKeys(userId, userEmail).forEach(k => {
+          if (!keysToUpdate.includes(k)) keysToUpdate.push(k);
+        });
+      }
 
-    for (const key of keysToUpdate) {
-      try {
-        const raw = localStorage.getItem(key);
-        const list: any[] = raw ? JSON.parse(raw) : [];
-        const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
-        if (!list.some(item => item.stock_symbol === cleanSymbol || item.stock_symbol === altSymbol)) {
-          list.push({ stock_symbol: cleanSymbol, stock_name: companyName, created_at: new Date().toISOString() });
-          localStorage.setItem(key, JSON.stringify(list));
+      for (const key of keysToUpdate) {
+        try {
+          const raw = localStorage.getItem(key);
+          const list: any[] = raw ? JSON.parse(raw) : [];
+          const altSymbol = cleanSymbol.endsWith('.NS') ? cleanSymbol.replace('.NS', '') : `${cleanSymbol}.NS`;
+          if (!list.some(item => item.stock_symbol === cleanSymbol || item.stock_symbol === altSymbol)) {
+            list.push({ stock_symbol: cleanSymbol, stock_name: companyName, created_at: new Date().toISOString() });
+            localStorage.setItem(key, JSON.stringify(list));
+          }
+        } catch (e) {
+          console.warn('LocalStorage save error:', e);
         }
-      } catch (e) {
-        console.warn('LocalStorage save error:', e);
       }
     }
 
@@ -403,24 +404,26 @@ export const api = {
       } catch {}
     }
 
-    // 1. Remove from LocalStorage cache
-    const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
-    if (userId && userId !== activeUserId) {
-      getCandidateStorageKeys(userId, userEmail).forEach(k => {
-        if (!keysToUpdate.includes(k)) keysToUpdate.push(k);
-      });
-    }
+    // 1. Remove from LocalStorage cache only for demo users
+    if (activeUserId === 'demo-user') {
+      const keysToUpdate = getCandidateStorageKeys(activeUserId, activeUserEmail);
+      if (userId && userId !== activeUserId) {
+        getCandidateStorageKeys(userId, userEmail).forEach(k => {
+          if (!keysToUpdate.includes(k)) keysToUpdate.push(k);
+        });
+      }
 
-    for (const key of keysToUpdate) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const list: any[] = JSON.parse(raw);
-          const filtered = list.filter(item => item.stock_symbol !== cleanSymbol && item.stock_symbol !== altSymbol);
-          localStorage.setItem(key, JSON.stringify(filtered));
+      for (const key of keysToUpdate) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const list: any[] = JSON.parse(raw);
+            const filtered = list.filter(item => item.stock_symbol !== cleanSymbol && item.stock_symbol !== altSymbol);
+            localStorage.setItem(key, JSON.stringify(filtered));
+          }
+        } catch (e) {
+          console.warn('LocalStorage remove error:', e);
         }
-      } catch (e) {
-        console.warn('LocalStorage remove error:', e);
       }
     }
 
