@@ -40,7 +40,7 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getDashboard(session.id);
+      const data = await api.getDashboard(session.id, session.email);
       
       // Initialize and lock session baselines once at start of session
       if (!isBaselineInitializedRef.current && data.stocks.length > 0) {
@@ -93,7 +93,7 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [session.id]);
+  }, [session.id, session.email]);
 
   useEffect(() => {
     loadDashboard();
@@ -270,11 +270,11 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
     });
 
     try {
-      await api.addStock(session.id, sym);
+      await api.addStock(session.id, sym, session.email);
     } catch (err) {
       console.warn('Async addStock notice:', err);
     }
-  }, [session.id]);
+  }, [session.id, session.email]);
 
   const handleRemoveStockOptimistic = useCallback(async (symbol: string) => {
     const clean = symbol.replace('.NS', '').trim();
@@ -290,11 +290,11 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
     });
 
     try {
-      await api.removeStock(session.id, symbol);
+      await api.removeStock(session.id, symbol, session.email);
     } catch (err) {
       console.warn('Async removeStock notice:', err);
     }
-  }, [session.id]);
+  }, [session.id, session.email]);
 
   return (
     <div className="min-h-screen bg-brand-bg text-brand-text flex flex-col font-sans">
