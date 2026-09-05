@@ -4,6 +4,8 @@ export interface StockCatalogItem {
   sector: string;
   basePrice: number;
   currentPrice: number;
+  change1D?: number;
+  percentChange1D?: number;
 }
 
 export interface WatchlistStockData {

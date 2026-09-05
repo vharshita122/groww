@@ -9,7 +9,7 @@ import { WatchlistManager } from '../components/WatchlistManager';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { UserSession, DashboardData, WatchlistStockData } from '../types';
-import { api } from '../services/api';
+import { api, getFallbackStockData } from '../services/api';
 
 interface Props {
   session: UserSession;
@@ -240,13 +240,17 @@ export const DashboardPage: React.FC<Props> = ({ session, onLogout }) => {
         return prev;
       }
 
-      const price = stockItem.currentPrice || 1000;
+      const fallback = getFallbackStockData(sym);
+      const price = stockItem.currentPrice || fallback.currentPrice || 1000;
+      const change1D = typeof stockItem.change1D === 'number' ? stockItem.change1D : fallback.change1D;
+      const percentChange1D = typeof stockItem.percentChange1D === 'number' ? stockItem.percentChange1D : fallback.percentChange1D;
+
       const newStock: any = {
         symbol: sym,
-        companyName: stockItem.companyName || clean,
+        companyName: stockItem.companyName || fallback.companyName || clean,
         currentPrice: price,
-        change1D: 0,
-        percentChange1D: 0,
+        change1D,
+        percentChange1D,
         high52W: Number((price * 1.25).toFixed(2)),
         low52W: Number((price * 0.75).toFixed(2)),
         hasBaseline: false,

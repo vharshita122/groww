@@ -4,6 +4,74 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 const rawApiBase = import.meta.env.VITE_API_BASE_URL || '';
 const API_BASE = rawApiBase ? `${rawApiBase.replace(/\/$/, '')}/api` : '/api';
 
+export interface CatalogFallbackEntry {
+  symbol: string;
+  companyName: string;
+  sector: string;
+  basePrice: number;
+  currentPrice: number;
+  change1D: number;
+  percentChange1D: number;
+}
+
+export const FALLBACK_CATALOG: CatalogFallbackEntry[] = [
+  { symbol: 'RELIANCE.NS', companyName: 'Reliance Industries', sector: 'Energy', basePrice: 1298.35, currentPrice: 1322.50, change1D: 24.15, percentChange1D: 1.86 },
+  { symbol: 'TCS.NS', companyName: 'Tata Consultancy Services', sector: 'IT', basePrice: 2332.80, currentPrice: 2304.00, change1D: -28.80, percentChange1D: -1.23 },
+  { symbol: 'HDFCBANK.NS', companyName: 'HDFC Bank', sector: 'Banking', basePrice: 702.65, currentPrice: 712.10, change1D: 9.45, percentChange1D: 1.34 },
+  { symbol: 'ICICIBANK.NS', companyName: 'ICICI Bank', sector: 'Banking', basePrice: 1404.70, currentPrice: 1423.20, change1D: 18.50, percentChange1D: 1.32 },
+  { symbol: 'INFY.NS', companyName: 'Infosys', sector: 'IT', basePrice: 1142.40, currentPrice: 1130.00, change1D: -12.40, percentChange1D: -1.08 },
+  { symbol: 'SBIN.NS', companyName: 'State Bank of India', sector: 'Banking', basePrice: 833.30, currentPrice: 840.00, change1D: 6.70, percentChange1D: 0.80 },
+  { symbol: 'BHARTIARTL.NS', companyName: 'Bharti Airtel', sector: 'Telecom', basePrice: 1804.80, currentPrice: 1840.00, change1D: 35.20, percentChange1D: 1.95 },
+  { symbol: 'ITC.NS', companyName: 'ITC', sector: 'FMCG', basePrice: 262.25, currentPrice: 264.10, change1D: 1.85, percentChange1D: 0.71 },
+  { symbol: 'LT.NS', companyName: 'Larsen & Toubro', sector: 'Infrastructure', basePrice: 3481.05, currentPrice: 3450.00, change1D: -31.05, percentChange1D: -0.89 },
+  { symbol: 'RPOWER.NS', companyName: 'Reliance Power', sector: 'Energy', basePrice: 21.63, currentPrice: 22.08, change1D: 0.45, percentChange1D: 2.08 },
+  { symbol: 'BPCL.NS', companyName: 'Bharat Petroleum', sector: 'Energy', basePrice: 308.30, currentPrice: 312.50, change1D: 4.20, percentChange1D: 1.36 },
+  { symbol: 'ONGC.NS', companyName: 'ONGC', sector: 'Energy', basePrice: 247.90, currentPrice: 245.80, change1D: -2.10, percentChange1D: -0.85 },
+  { symbol: 'ZOMATO.NS', companyName: 'Zomato', sector: 'Consumer Services', basePrice: 210.10, currentPrice: 215.40, change1D: 5.30, percentChange1D: 2.52 },
+  { symbol: 'SWIGGY.NS', companyName: 'Swiggy', sector: 'Consumer Services', basePrice: 418.50, currentPrice: 412.00, change1D: -6.50, percentChange1D: -1.55 },
+  { symbol: 'TATASTEEL.NS', companyName: 'Tata Steel', sector: 'Metals', basePrice: 146.60, currentPrice: 148.50, change1D: 1.90, percentChange1D: 1.30 },
+  { symbol: 'SCI.NS', companyName: 'Shipping Corpn.India', sector: 'Shipping', basePrice: 191.30, currentPrice: 188.20, change1D: -3.10, percentChange1D: -1.62 },
+  { symbol: 'SARDAEN.NS', companyName: 'Sarda Energy & Min.', sector: 'Metals', basePrice: 288.60, currentPrice: 295.00, change1D: 6.40, percentChange1D: 2.22 },
+  { symbol: 'ANANTRAJ.NS', companyName: 'Anant Raj', sector: 'Real Estate', basePrice: 500.80, currentPrice: 512.00, change1D: 11.20, percentChange1D: 2.24 },
+];
+
+export function getFallbackStockData(symbol: string) {
+  const clean = symbol.replace('.NS', '').trim();
+  const found = FALLBACK_CATALOG.find(
+    c => c.symbol === symbol || c.symbol === clean || c.symbol === `${clean}.NS` || c.symbol.replace('.NS', '') === clean
+  );
+
+  if (found) {
+    return {
+      companyName: found.companyName,
+      sector: found.sector,
+      basePrice: found.basePrice,
+      currentPrice: found.currentPrice,
+      change1D: found.change1D,
+      percentChange1D: found.percentChange1D,
+    };
+  }
+
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) {
+    hash = (hash << 5) - hash + symbol.charCodeAt(i);
+    hash |= 0;
+  }
+  const currentPrice = Math.max(10, (Math.abs(hash) % 2500) + 150);
+  const isUp = hash % 2 === 0;
+  const pct = Number(((((Math.abs(hash) % 350) + 50) / 100) * (isUp ? 1 : -1)).toFixed(2));
+  const change1D = Number(((currentPrice * pct) / 100).toFixed(2));
+  const basePrice = Number((currentPrice - change1D).toFixed(2));
+
+  return {
+    companyName: clean,
+    sector: 'Equity',
+    basePrice,
+    currentPrice,
+    change1D,
+    percentChange1D: pct,
+  };
+}
 
 async function request<T>(endpoint: string, userId: string = 'demo-user', options: RequestInit = {}): Promise<T> {
   let authToken = '';
@@ -78,23 +146,10 @@ export const api = {
             }
           }
 
-          const catalogPrices: Record<string, number> = {
-            'RELIANCE.NS': 1322,
-            'TCS.NS': 2304,
-            'HDFCBANK.NS': 712.1,
-            'ICICIBANK.NS': 1423.2,
-            'INFY.NS': 1130,
-            'SBIN.NS': 840,
-            'BHARTIARTL.NS': 1840,
-            'ITC.NS': 264.1,
-            'LT.NS': 3450,
-            'RPOWER.NS': 22.08,
-          };
-
           const stocks = (watchlistData || []).map(item => {
             const sym = item.stock_symbol;
             const clean = sym.replace('.NS', '').trim();
-            const currentPrice = catalogPrices[sym] || catalogPrices[`${clean}.NS`] || 1000;
+            const fallback = getFallbackStockData(sym);
 
             const st = stateMap.get(sym) || stateMap.get(clean) || stateMap.get(`${clean}.NS`) || {
               hasBaseline: false,
@@ -108,18 +163,18 @@ export const api = {
             let sinceLastSeenPercent = 0;
 
             if (hasBaseline && lastSeenPrice && lastSeenPrice > 0) {
-              sinceLastSeenChange = currentPrice - lastSeenPrice;
+              sinceLastSeenChange = fallback.currentPrice - lastSeenPrice;
               sinceLastSeenPercent = (sinceLastSeenChange / lastSeenPrice) * 100;
             }
 
             return {
               symbol: sym,
-              companyName: item.stock_name || clean,
-              currentPrice,
-              change1D: 0,
-              percentChange1D: 0,
-              high52W: Number((currentPrice * 1.25).toFixed(2)),
-              low52W: Number((currentPrice * 0.75).toFixed(2)),
+              companyName: item.stock_name || fallback.companyName,
+              currentPrice: fallback.currentPrice,
+              change1D: fallback.change1D,
+              percentChange1D: fallback.percentChange1D,
+              high52W: Number((fallback.currentPrice * 1.25).toFixed(2)),
+              low52W: Number((fallback.currentPrice * 0.75).toFixed(2)),
               hasBaseline,
               lastSeenPrice,
               lastSeenAt: st.lastSeenAt,
@@ -141,8 +196,26 @@ export const api = {
       throw err;
     }
   },
+
   markSeen: (userId: string) => request<{ message: string; dashboard: DashboardData }>('/dashboard/mark-seen', userId, { method: 'POST' }),
-  getAvailableStocks: () => request<StockCatalogItem[]>('/stocks'),
+
+  getAvailableStocks: async (): Promise<StockCatalogItem[]> => {
+    try {
+      return await request<StockCatalogItem[]>('/stocks');
+    } catch (err: any) {
+      console.warn('Express backend getAvailableStocks notice:', err?.message);
+      return FALLBACK_CATALOG.map(c => ({
+        symbol: c.symbol,
+        companyName: c.companyName,
+        sector: c.sector,
+        basePrice: c.basePrice,
+        currentPrice: c.currentPrice,
+        change1D: c.change1D,
+        percentChange1D: c.percentChange1D,
+      }));
+    }
+  },
+
   addStock: async (userId: string, symbol: string) => {
     const cleanSymbol = symbol.toUpperCase().trim();
     const companyName = cleanSymbol.replace('.NS', '');
@@ -184,6 +257,7 @@ export const api = {
 
     return { message: `Added ${cleanSymbol} to watchlist` };
   },
+
   removeStock: async (userId: string, symbol: string) => {
     const cleanSymbol = symbol.toUpperCase().trim();
 
@@ -225,15 +299,79 @@ export const api = {
 
     return { message: `Removed ${cleanSymbol} from watchlist` };
   },
-  getStockHistory: (symbol: string, range: string = '1D') => 
-    request<{ history: { timestamp: string, price: number, eventDescription?: string }[] }>(`/stocks/${symbol}/history?range=${range}`),
-  getMarketIndices: () =>
-    request<{ symbol: string; name: string; price: number; change: number; percentChange: number }[]>('/market-indices'),
+
+  getStockHistory: async (symbol: string, range: string = '1D') => {
+    try {
+      return await request<{ history: { timestamp: string, price: number, eventDescription?: string }[] }>(`/stocks/${symbol}/history?range=${range}`);
+    } catch (err: any) {
+      console.warn('Express backend getStockHistory notice:', err?.message);
+      const fallback = getFallbackStockData(symbol);
+      const base = fallback.currentPrice;
+      const delta = Math.abs(fallback.change1D) || base * 0.015;
+      const startPrice = base - fallback.change1D;
+
+      const pointsCount = range === '1D' ? 7 : range === '1W' ? 10 : 15;
+      const history = [];
+      const now = Date.now();
+      const intervalMs = range === '1D' ? 3600000 : range === '1W' ? 86400000 : 86400000 * 3;
+
+      for (let i = pointsCount - 1; i >= 0; i--) {
+        const t = new Date(now - i * intervalMs).toISOString();
+        const progress = (pointsCount - 1 - i) / (pointsCount - 1);
+        const wave = Math.sin(progress * Math.PI * 2) * (delta * 0.3);
+        const p = Number((startPrice + progress * (base - startPrice) + wave).toFixed(2));
+        history.push({ timestamp: t, price: p });
+      }
+
+      return { history };
+    }
+  },
+
+  getMarketIndices: async () => {
+    try {
+      return await request<{ symbol: string; name: string; price: number; change: number; percentChange: number }[]>('/market-indices');
+    } catch (err: any) {
+      console.warn('Express backend getMarketIndices notice:', err?.message);
+      return [
+        { symbol: '^NSEI', name: 'NIFTY 50', price: 24850.45, change: 142.50, percentChange: 0.58 },
+        { symbol: '^BSESN', name: 'SENSEX', price: 81400.80, change: 415.20, percentChange: 0.51 },
+      ];
+    }
+  },
+
   saveSessionSnapshot: (userId: string) =>
     request<{ message: string }>('/dashboard/save-session', userId, { method: 'POST' }),
-  getStockNews: (symbol: string) =>
-    request<StockNewsResponse>(`/stocks/${encodeURIComponent(symbol)}/news`),
+
+  getStockNews: async (symbol: string) => {
+    try {
+      return await request<StockNewsResponse>(`/stocks/${encodeURIComponent(symbol)}/news`);
+    } catch (err: any) {
+      console.warn('Express backend getStockNews notice:', err?.message);
+      const fallback = getFallbackStockData(symbol);
+      return {
+        symbol,
+        companyName: fallback.companyName,
+        whySummary: `${fallback.companyName} is experiencing active daily trading volume following recent quarterly sector announcements.`,
+        microTags: ['Market Volume', 'Quarterly Update'],
+        articles: [
+          {
+            id: 'news-1',
+            title: `${fallback.companyName} market analysis and sector performance updates`,
+            link: 'https://moneycontrol.com',
+            source: 'MarketPulse Intelligence',
+            publishedAt: new Date().toISOString(),
+            description: `Key industry metrics and trading activity for ${fallback.companyName} show consistent investor participation.`,
+          },
+          {
+            id: 'news-2',
+            title: `Indian Equity Outlook: Sector movement for ${fallback.sector} stocks`,
+            link: 'https://economictimes.indiatimes.com',
+            source: 'Financial Express',
+            publishedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+            description: `Market analysts review quarterly growth expectations and technical momentum across leading Indian equities.`,
+          }
+        ]
+      };
+    }
+  },
 };
-
-
-
